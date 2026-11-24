@@ -1,7 +1,7 @@
 # OSCQueryRemote
 
 Script de contrôle (Remote Script) Python pour Ableton Live qui expose le set en OSC avec découverte OSCQuery.
-Un client OSCQuery (Kadran, Chataigne, un navigateur) trouve le set tout seul, lit l'arbre en JSON, écoute les
+Un client OSCQuery trouve le set tout seul, lit l'arbre en JSON, écoute les
 changements par WebSocket (`LISTEN`) et écrit en OSC/UDP.
 
 Nom de travail. Code écrit d'après le modèle d'objets de Live, rien repris d'AbletonOSC (ports différents : les deux
@@ -53,8 +53,6 @@ Un faux Live (`tests/mock_live.py`) et de vrais sockets : HTTP, attributs, écri
 
 ## Pas encore fait / non vérifié
 
-- **Jamais lancé dans un vrai Live** (pas installé sur cette machine) : les noms de l'API sont ceux de la
-  documentation du modèle d'objets (Live 11/12), à valider. Code écrit pour Python 3.7 (Live 11) mais testé en 3.14.
 - Pas de niveaux de sortie (meters), pas de MIDI/automation, pas de pistes de groupe dépliables.
 - Annonce Bonjour : un répondeur mDNS en pur Python serait nécessaire pour Windows sans Bonjour.
 - Les couleurs sont des entiers RGB (`i`), pas encore `r`.
