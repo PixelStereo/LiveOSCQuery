@@ -1,2 +1,2 @@
-# OSCQuery4Live
+# LiveOSCQuery
 OSCQuery Dynamic namespace for Ableton Live app
