@@ -1,59 +1,49 @@
 # OSCQueryRemote
 
-Script de contrôle (Remote Script) Python pour Ableton Live qui expose le set en OSC avec découverte OSCQuery.
-Un client OSCQuery trouve le set tout seul, lit l'arbre en JSON, écoute les
-changements par WebSocket (`LISTEN`) et écrit en OSC/UDP.
+A Python control script (Remote Script) for Ableton Live that exposes the set over OSC with OSCQuery discovery. An OSCQuery client finds the set automatically, reads the tree as JSON, listens for changes over WebSocket (`LISTEN`), and writes via OSC/UDP.
 
-Nom de travail. Code écrit d'après le modèle d'objets de Live, rien repris d'AbletonOSC (ports différents : les deux
-peuvent tourner ensemble).
+Working name. Written from Live's object model, with nothing taken from AbletonOSC (uses different ports so both can run together).
 
 ## Installation
 
-Copier le dossier `OSCQueryRemote/` dans `~/Music/Ableton/User Library/Remote Scripts/`, redémarrer Live, puis
-Réglages > Link, Tempo & MIDI > Control Surface > `OSCQueryRemote`. Le journal de Live (`Log.txt`) dit les ports.
+Copy the `OSCQueryRemote/` folder into `~/Music/Ableton/User Library/Remote Scripts/`, restart Live, and go to **Settings > Link, Tempo & MIDI > Control Surface > `OSCQueryRemote`**. Live's log file (`Log.txt`) reports the ports.
 
-- HTTP + WebSocket OSCQuery : TCP 9101 (le système en choisit un autre si occupé, `HOST_INFO` le dit)
-- OSC entrant : UDP 9100
-- Annonce Bonjour `_oscjson._tcp` via `dns-sd` (macOS, Windows avec Bonjour) ou `avahi-publish-service` (Linux).
-  Sans l'un d'eux, pas d'annonce : saisir l'adresse à la main.
+- **OSCQuery HTTP + WebSocket:** TCP 9101 (the OS picks another if busy; `HOST_INFO` reports it)
+- **Incoming OSC:** UDP 9100
+- **Bonjour announcement** (`_oscjson._tcp`) via `dns-sd` (macOS, Windows with Bonjour) or `avahi-publish-service` (Linux). Without either one, there is no announcement—enter the address manually.
 
-## Arbre (chemins par index, le nom est une valeur)
+## Tree (index-based paths, name is a value)
 
-| Chemin | Contenu |
+| Path | Contents |
 |---|---|
 | `/transport/` | play, stop, continue, stop_all_clips, record, session_record, overdub, loop, metronome, tempo, position, signature_*, tap_tempo, undo, redo |
-| `/tracks/N/` | name, volume, pan, mute, solo, arm (si armable), stop, `sends/K`, `devices/M/parameters/K`, `clips/S/{fire,stop,has_clip,playing,triggered,name,color,looping,length}` |
+| `/tracks/N/` | name, volume, pan, mute, solo, arm (if armable), stop, `sends/K`, `devices/M/parameters/K`, `clips/S/{fire,stop,has_clip,playing,triggered,name,color,looping,length}` |
 | `/returns/N/` | name, volume, pan, mute, solo, devices |
 | `/master/` | volume, pan, cue_volume, devices |
 | `/scenes/S/` | name, color, fire |
-| `/view/` | selected_track, selected_scene, `selected_device/parameters/K` (macros du dispositif sélectionné) |
+| `/view/` | selected_track, selected_scene, `selected_device/parameters/K` (macros of the selected device) |
 
-Types : `f` flottant, `i` entier, `T` booléen, `s` texte, `I` déclencheur (envoyer le message sans argument).
-`RANGE` vient de `min`/`max` du paramètre (volume 0..1, pan -1..1, tempo 20..999). Les paramètres de dispositif
-sont leur valeur brute.
+Types: `f` float, `i` integer, `T` boolean, `s` string, `I` trigger (send the message with no arguments). `RANGE` comes from the parameter's `min`/`max` (volume 0..1, pan -1..1, tempo 20..999). Device parameters use their raw value.
 
-## Fonctionnement
+## How It Works
 
-- Un seul fil : tout est appelé depuis `update_display()` (environ 100 ms) car l'API de Live n'est utilisable que
-  sur son fil principal. Latence de commande de l'ordre de la tick.
-- Aucun écouteur Live : les valeurs sont lues à la demande, et interrogées à chaque tick pour les clients qui
-  font `LISTEN`. Pas d'écouteur à nettoyer.
-- L'arbre est reconstruit (toutes les ~0,5 s si la signature change : pistes, scènes, dispositifs, dispositif
-  sélectionné) et les clients reçoivent `PATH_ADDED` / `PATH_REMOVED`.
-- WebSocket refusé si l'en-tête `Origin` n'est pas local (une page web quelconque ne peut pas piloter Live).
-- Pas d'authentification : à utiliser sur un réseau de confiance.
+- **Single thread:** Everything is called from `update_display()` (roughly every 100 ms) because Live's API can only be used on its main thread. Command latency is on the order of a tick.
+- **No Live listeners:** Values are read on demand and polled every tick for clients using `LISTEN`. No listeners to clean up.
+- **Dynamic tree updates:** The tree is rebuilt (roughly every 0.5 s if the signature changes: tracks, scenes, devices, selected device) and clients receive `PATH_ADDED` / `PATH_REMOVED`.
+- **Origin check:** WebSocket connections are rejected if the `Origin` header is not local (arbitrary web pages cannot control Live).
+- **No authentication:** Use on a trusted network.
 
 ## Tests
 
-```
+```bash
 python3 -I tests/test_all.py
 ```
-Un faux Live (`tests/mock_live.py`) et de vrais sockets : HTTP, attributs, écritures UDP, WebSocket LISTEN/IGNORE,
-`PATH_REMOVED`, OSC par WebSocket, refus d'Origin.
 
-## Pas encore fait / non vérifié
+Uses a mock Live (`tests/mock_live.py`) and real sockets: HTTP, attributes, UDP writes, WebSocket `LISTEN`/`IGNORE`, `PATH_REMOVED`, OSC over WebSocket, and `Origin` rejection.
 
-- Pas de niveaux de sortie (meters), pas de MIDI/automation, pas de pistes de groupe dépliables.
-- Annonce Bonjour : un répondeur mDNS en pur Python serait nécessaire pour Windows sans Bonjour.
-- Les couleurs sont des entiers RGB (`i`), pas encore `r`.
-- Réécritures d'index : supprimer une piste décale les chemins suivants (c'est le prix des chemins par index).
+## Not Yet Done / Unverified
+
+- No output meters, no MIDI/automation, and no expandable group tracks.
+- **Bonjour announcement:** A pure-Python mDNS responder would be needed for Windows without Bonjour.
+- Colors are RGB integers (`i`), not yet `r`.
+- **Index shifts:** Deleting a track shifts subsequent paths (the trade-off of index-based paths).
