@@ -3,6 +3,7 @@
 Paths are index based (/tracks/0/volume) and carry the name as a value, so a rename never moves a path.
 Nothing here keeps a listener on Live: values are read when asked and polled for the clients that LISTEN.
 """
+from .osc import RGBA
 from .tree import Node, Tree
 
 
@@ -23,7 +24,7 @@ def prop(parent, name, obj, attr, type, rng=None, rw=True, desc=None):
 
 
 def trigger(parent, name, fn, desc=None):
-    return parent.add(Node(name, "I", None, lambda _v: fn(), None, desc))
+    return parent.add(Node(name, "N", None, lambda _v: fn(), None, desc))
 
 
 def container(parent, name, desc=None):
@@ -70,12 +71,28 @@ def _device(parent, name, device):
     d.add(Node("name", "s", _safe(lambda: device.name, ""), None))
     d.add(Node("class_name", "s", _safe(lambda: device.class_name, ""), None))
     params = container(d, "parameters")
+    automation = container(d, "automation_state")
     for i, p in enumerate(device.parameters):
         param(params, str(i), p)
+        prop(automation, str(i), p, "automation_state", "i", rw=False)
     return d
 
 
+def _meter(parent, track):
+    audio = getattr(track, "has_audio_output", False)
+    if audio or getattr(track, "has_midi_output", False):
+        prop(parent, "output_meter", track, "output_meter_level", "f", (0.0, 1.0), rw=False)
+    if audio:
+        for channel in ("output_meter_left", "output_meter_right"):
+            prop(parent, channel, track, channel, "f", (0.0, 1.0), rw=False)
+
+
+def _rgba(rgb):
+    return RGBA((int(rgb) & 0xFFFFFF) << 8 | 0xFF)
+
+
 def _mixer(parent, track, with_arm=False, with_sends=True):
+    _meter(parent, track)
     m = track.mixer_device
     parent.add(Node("name", "s", _safe(lambda: track.name, ""), _setter(track, "name")))
     param(parent, "volume", m.volume)
@@ -93,10 +110,16 @@ def _mixer(parent, track, with_arm=False, with_sends=True):
         _device(devs, str(i), d)
 
 
-def _slot(parent, name, slot):
+def _slot(parent, name, slot, midi_track):
     s = container(parent, name)
     trigger(s, "fire", slot.fire)
     trigger(s, "stop", slot.stop)
+    if midi_track and callable(getattr(slot, "create_clip", None)):
+        def create_midi_clip(length):
+            if not slot.has_clip and 0 < length < float("inf"):
+                slot.create_clip(length)
+
+        s.add(Node("create_midi_clip", "f", set=create_midi_clip, description="Length in beats"))
     s.add(Node("has_clip", "T", _safe(lambda: slot.has_clip, False), None))
     s.add(Node("playing", "T", _safe(lambda: bool(slot.is_playing), False), None))
     s.add(Node("triggered", "T", _safe(lambda: bool(slot.is_triggered), False), None))
@@ -111,7 +134,11 @@ def _slot(parent, name, slot):
         return set_
 
     s.add(Node("name", "s", clip_get("name", ""), clip_set("name")))
-    s.add(Node("color", "i", clip_get("color", 0), clip_set("color")))
+    rgb = clip_get("color", 0)
+    set_rgb = clip_set("color")
+    s.add(Node("color", "r", lambda: _rgba(rgb()), lambda value: set_rgb(value >> 8)))
+    s.add(Node("color_rgb", "i", rgb, set_rgb, (0, 0xFFFFFF)))
+    s.add(Node("is_midi_clip", "T", clip_get("is_midi_clip", False), None))
     s.add(Node("looping", "T", clip_get("looping", False), clip_set("looping")))
     s.add(Node("length", "f", clip_get("length", 0.0), None))
 
@@ -123,7 +150,26 @@ def _index_of(items, obj):
     return -1
 
 
-def build(song):
+class TrackIds(object):
+    """Allocates session-local IDs without depending on Live proxy hashing."""
+
+    def __init__(self):
+        self.entries = []
+        self.next_id = 0
+
+    def update(self, tracks):
+        entries = []
+        for track in tracks:
+            previous = next((key for obj, key in self.entries if track == obj), None)
+            if previous is None:
+                previous = str(self.next_id)
+                self.next_id += 1
+            entries.append((track, previous))
+        self.entries = entries
+        return [key for _, key in entries]
+
+
+def build(song, track_ids=None):
     tree = Tree()
     root = tree.root
 
@@ -150,13 +196,23 @@ def build(song):
     scenes = list(song.scenes)
 
     tr = container(root, "tracks")
+    ids = (track_ids if track_ids is not None else TrackIds()).update(tracks)
+    stable = container(root, "tracks_by_id", "Track addresses stable during this session")
     for i, track in enumerate(tracks):
-        n = container(tr, str(i))
-        _mixer(n, track, with_arm=True)
-        trigger(n, "stop", track.stop_all_clips)
-        clips = container(n, "clips")
-        for j, slot in enumerate(track.clip_slots):
-            _slot(clips, str(j), slot)
+        group_index = _index_of(tracks, getattr(track, "group_track", None))
+        midi_track = bool(getattr(track, "has_midi_input", False))
+        group_id = ids[group_index] if group_index >= 0 else ""
+        for branch, key in ((tr, str(i)), (stable, ids[i])):
+            n = container(branch, key)
+            _mixer(n, track, with_arm=True)
+            n.add(Node("id", "s", lambda key=ids[i]: key))
+            n.add(Node("group_id", "s", lambda key=group_id: key))
+            if getattr(track, "is_foldable", False):
+                prop(n, "folded", track, "fold_state", "T")
+            trigger(n, "stop", track.stop_all_clips)
+            clips = container(n, "clips")
+            for j, slot in enumerate(track.clip_slots):
+                _slot(clips, str(j), slot, midi_track)
 
     rt = container(root, "returns")
     for i, track in enumerate(returns):
@@ -164,6 +220,7 @@ def build(song):
 
     m = container(root, "master")
     mm = song.master_track
+    _meter(m, mm)
     param(m, "volume", mm.mixer_device.volume)
     param(m, "pan", mm.mixer_device.panning)
     try:
@@ -174,11 +231,15 @@ def build(song):
     for i, d in enumerate(mm.devices):
         _device(devs, str(i), d)
 
+    if callable(getattr(song, "re_enable_automation", None)):
+        trigger(t, "re_enable_automation", song.re_enable_automation)
+
     sc = container(root, "scenes")
     for i, scene in enumerate(scenes):
         n = container(sc, str(i))
         n.add(Node("name", "s", _safe(lambda s=scene: s.name, ""), _setter(scene, "name")))
-        n.add(Node("color", "i", _safe(lambda s=scene: s.color, 0), None))
+        n.add(Node("color", "r", lambda s=scene: _rgba(s.color)))
+        prop(n, "color_rgb", scene, "color", "i", rw=False)
         trigger(n, "fire", scene.fire)
 
     v = container(root, "view", "What is selected in Live")
@@ -213,12 +274,22 @@ def selected_device(song):
 
 
 def signature(song):
-    """Everything whose change means a new tree (counts, devices, the selected device)."""
+    """Keep Live object references so replacements with the same shape are detected."""
     def devs(track):
-        return tuple((d.class_name, len(d.parameters)) for d in track.devices)
+        return tuple((d, tuple(d.parameters)) for d in track.devices)
+
+    def track_shape(track):
+        return (track, getattr(track, "group_track", None),
+                bool(getattr(track, "is_foldable", False)),
+                bool(getattr(track, "can_be_armed", False)),
+                bool(getattr(track, "has_midi_input", False)),
+                bool(getattr(track, "has_audio_output", False)),
+                bool(getattr(track, "has_midi_output", False)),
+                tuple(track.mixer_device.sends), devs(track))
+
     return (
-        len(song.scenes),
-        tuple((len(t.clip_slots), bool(getattr(t, "can_be_armed", False)), len(t.mixer_device.sends), devs(t)) for t in song.tracks),
-        tuple((len(t.mixer_device.sends), devs(t)) for t in song.return_tracks),
-        devs(song.master_track),
+        tuple(song.scenes),
+        tuple((track_shape(t), tuple(t.clip_slots)) for t in song.tracks),
+        tuple(track_shape(t) for t in song.return_tracks),
+        track_shape(song.master_track),
     )

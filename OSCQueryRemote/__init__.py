@@ -23,6 +23,7 @@ if ControlSurface is not None:
         def __init__(self, c_instance):
             ControlSurface.__init__(self, c_instance)
             self._ticks = 0
+            self._track_ids = live_model.TrackIds()
             self._signature = None
             self._device = None
             self._server = None
@@ -41,9 +42,11 @@ if ControlSurface is not None:
 
         def _rebuild(self):
             song = self.song()
-            self._signature = live_model.signature(song)
-            self._device = live_model.selected_device(song)
-            self._server.set_tree(live_model.build(song))
+            signature = live_model.signature(song)
+            device = live_model.selected_device(song)
+            self._server.set_tree(live_model.build(song, self._track_ids))
+            self._signature = signature
+            self._device = device
 
         def update_display(self):
             ControlSurface.update_display(self)
@@ -52,6 +55,8 @@ if ControlSurface is not None:
             try:
                 self._ticks += 1
                 if self._ticks % STRUCTURE_CHECK_EVERY == 0:
+                    if self._advertiser is not None:
+                        self._advertiser.poll()
                     song = self.song()
                     if live_model.signature(song) != self._signature or live_model.selected_device(song) != self._device:
                         self._rebuild()

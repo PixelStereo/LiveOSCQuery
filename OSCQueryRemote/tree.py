@@ -1,7 +1,14 @@
 """The OSCQuery tree: nodes, lookup, and the JSON description (attribute names as pxs-core writes them)."""
 
+from .osc import RGBA
+
+
 # OSC type -> how a written value is coerced
 def _coerce(t, v):
+    if t == "r":
+        if not isinstance(v, RGBA):
+            raise ValueError("expected OSC RGBA")
+        return v
     if t == "f":
         return float(v)
     if t == "i":
@@ -18,7 +25,7 @@ def _coerce(t, v):
 class Node(object):
     """A container (type None) or a parameter.
 
-    type: 'f' float, 'i' int, 's' string, 'T' boolean, 'I' trigger (no value).
+    type: 'f' float, 'i' int, 's' string, 'T' boolean, 'N' trigger (no value).
     get(): the current value, or None. set(value): applies a coerced value (set(None) for a trigger).
     description may be a string or a callable returning one.
     """
@@ -38,7 +45,7 @@ class Node(object):
     def access(self):
         if self.type is None:
             return 0
-        if self.type == "I":
+        if self.type == "N":
             return 2
         return (1 if self.get else 0) | (2 if self.set else 0)
 
@@ -69,7 +76,7 @@ class Node(object):
         """Applies an incoming OSC message. Returns True when something was done."""
         if self.set is None:
             return False
-        if self.type == "I":
+        if self.type == "N":
             self.set(None)
             return True
         if not args:
@@ -106,6 +113,8 @@ class Tree(object):
 
 
 def _json_value(t, v):
+    if t == "r":
+        return "#%08X" % v
     if t == "T":
         return bool(v)
     if t == "i":
@@ -123,7 +132,7 @@ def describe(node, contents=True):
         o["DESCRIPTION"] = str(d)
     if node.type:
         o["TYPE"] = node.type
-        if node.type != "I" and (node.access & 1):
+        if node.type != "N" and (node.access & 1):
             v = node.value()
             if v is not None:
                 o["VALUE"] = [_json_value(node.type, v)]
