@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: PixelStereo/pxs-core
-          ref: refs/tags/compat/oscquery-momentary-actions
+          ref: refs/tags/v0.17.0
           path: pxs-core-vectors
       - uses: actions/setup-python@v5
         with:
