@@ -2,6 +2,10 @@
 import struct
 
 
+class RGBA(int):
+    """Unsigned packed OSC color (0xRRGGBBAA)."""
+
+
 def _pad(b):
     return b + b"\0" * (-len(b) % 4)
 
@@ -16,6 +20,9 @@ def encode_message(address, args=()):
     for a in args:
         if isinstance(a, bool):
             tags += "T" if a else "F"
+        elif isinstance(a, RGBA):
+            tags += "r"
+            data += struct.pack(">I", a)
         elif isinstance(a, int):
             tags += "i"
             data += struct.pack(">i", max(-2 ** 31, min(2 ** 31 - 1, a)))
@@ -93,7 +100,7 @@ def _decode(data, out):
             elif t == "c":
                 args.append(chr(struct.unpack_from(">i", data, i)[0])); i += 4
             elif t == "r":
-                args.append(struct.unpack_from(">I", data, i)[0]); i += 4
+                args.append(RGBA(struct.unpack_from(">I", data, i)[0])); i += 4
             elif t == "t":
                 i += 8
             elif t == "m":

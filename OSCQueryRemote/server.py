@@ -290,7 +290,7 @@ class Server(object):
         if cmd == "LISTEN":
             c.listen.add(node.path() if node.path() != "/" else "/")
             for n in node.walk():
-                if n.type and n.type != "I" and (n.access & 1):
+                if n.type and n.type != "N" and (n.access & 1):
                     c.last[n.path()] = n.value()
         elif cmd == "IGNORE":
             c.listen.discard(node.path())
@@ -310,7 +310,7 @@ class Server(object):
                 if node is None:
                     continue
                 for n in node.walk():
-                    if not n.type or n.type == "I" or not (n.access & 1):
+                    if not n.type or n.type == "N" or not (n.access & 1):
                         continue
                     p = n.path()
                     v = n.value()
@@ -335,6 +335,8 @@ class Server(object):
 
 
 def _osc_arg(t, v):
+    if t == "r":
+        return osc.RGBA(v)
     if t == "T":
         return bool(v)
     if t == "i":
