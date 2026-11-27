@@ -1,0 +1,24 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: PixelStereo/pxs-core
+          ref: refs/tags/v0.17.0
+          path: pxs-core-vectors
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -I tests/test_all.py
+      - run: python -I tests/test_compatibility.py pxs-core-vectors/test/golden/vectors.tsv
